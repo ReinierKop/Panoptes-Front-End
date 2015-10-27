@@ -4,23 +4,18 @@ putFile = require '../../lib/put-file'
 FileButton = require '../../components/file-button'
 {MarkdownEditor} = require 'markdownz'
 debounce = require 'debounce'
+{Provider, connect} = require 'react-redux'
+store = require '../../store'
+projectActions = require '../../actions/project'
+tutorialActions = require '../../actions/tutorial'
 
 TutorialStepEditor = React.createClass
   getDefaultProps: ->
-    step: null
-    media: null
-
-    onChange: ->
-      console.log 'TutorialStepEditor onChange', arguments
-
-    onMediaSelect: ->
-      console.log 'TutorialStepEditor onMediaSelect', arguments
-
-    onMediaClear: ->
-      console.log 'TutorialStepEditor onMediaClear', arguments
-
-    onRemove: ->
-      console.log 'TutorialStepEditor onRemove', arguments
+    mediaSrc: ''
+    content: ''
+    onRemove: -> console.warn 'TutorialStepEditor onRemove', arguments
+    onMediaChange: -> console.warn 'TutorialStepEditor onMediaChange', arguments
+    onContentChange: -> console.warn 'TutorialStepEditor onContentChange', arguments
 
   render: ->
     <div style={
@@ -32,45 +27,37 @@ TutorialStepEditor = React.createClass
       </header>
       <div>
         <header>Media</header>
-        {if @props.media?
+        {if @props.mediaSrc
           <div>
-            <img src={@props.media.src} style={
+            <img src={@props.mediaSrc} style={
               maxHeight: '5em'
               maxWidth: '100%'
             } />
-            <button type="button" className="minor-button" onClick={@props.onMediaClear}>Clear media</button>
+            <button type="button" className="minor-button" onClick={@handleMediaChange}>Clear media</button>
           </div>}
         <FileButton className="standard-button" onSelect={@handleMediaChange}>Select</FileButton>
       </div>
       <div>
         <header>Content</header>
-        <MarkdownEditor value={@props.step.content} onChange={@handleContentChange} />
+        <MarkdownEditor value={@props.content} onChange={@handleContentChange} />
       </div>
     </div>
 
   handleMediaChange: (e) ->
-    @props.onMediaSelect e.target.files[0], arguments...
+    @props.onMediaChange e.target.files?[0], arguments...
 
   handleContentChange: (e) ->
-    @props.onChange 'content', e.target.value, arguments...
+    @props.onContentChange e.target.value, arguments...
 
 
 TutorialEditor = React.createClass
   getDefaultProps: ->
-    tutorial: null
-    media: null
-
-    onStepAdd: ->
-      console.log 'TutorialEditor onStepAdd', arguments
-
-    onStepRemove: ->
-      console.log 'TutorialEditor onStepRemove', arguments
-
-    onMediaSelect: ->
-      console.log 'TutorialEditor onMediaSelect', arguments
-
-    onStepChange: ->
-      console.log 'TutorialEditor onChange', arguments
+    steps: []
+    media: {}
+    onStepAdd: -> console.warn 'TutorialEditor onStepAdd', arguments
+    onStepRemove: -> console.warn 'TutorialEditor onStepRemove', arguments
+    onStepMediaChange: -> console.warn 'TutorialEditor onMediaChange', arguments
+    onStepContentChange: -> console.warn 'TutorialEditor onStepContentChange', arguments
 
   render: ->
     <div>
@@ -79,19 +66,18 @@ TutorialEditor = React.createClass
         <p><strong>Work in progress.</strong></p>
       </div>
       <div>
-        {if @props.tutorial.steps.length is 0
+        {if @props.steps.length is 0
           <p>This tutorial has no steps.</p>
         else
-          for step, i in @props.tutorial.steps
+          for step, i in @props.steps
             step._key ?= Math.random()
             <TutorialStepEditor
               key={step._key}
-              step={step}
-              media={@props.media?[step.media]}
-              onMediaSelect={@props.onMediaSelect.bind null, i}
-              onMediaClear={@props.onMediaClear.bind null, i}
-              onChange={@props.onStepChange.bind null, i}
+              mediaSrc={@props.media[step.media]?.src}
+              content={step.content}
               onRemove={@props.onStepRemove.bind null, i}
+              onMediaChange={@props.onStepMediaChange.bind null, i}
+              onContentChange={@props.onStepContentChange.bind null, i}
             />}
       </div>
       <div>
@@ -102,206 +88,94 @@ TutorialEditor = React.createClass
 
 TutorialEditorController = React.createClass
   getDefaultProps: ->
-    project: null
     tutorial: null
     media: {}
-    delayBeforeSave: 5000
-
-    onChangeMedia: ->
-      console.log 'TutorialEditorController onChangeMedia', arguments
-
-    onDelete: ->
-      console.log 'TutorialEditorController onDelete', arguments
-
-  componentDidMount: ->
-    @_boundForceUpdate = @forceUpdate.bind this
-    @props.tutorial.listen @_boundForceUpdate
-
-  componentWillUnmount: ->
-    @props.tutorial.stopListening @_boundForceUpdate
+    dispatch: -> console.warn 'TutorialEditorController dispatch', arguments
 
   render: ->
     <TutorialEditor
-      tutorial={@props.tutorial}
+      steps={@props.tutorial.steps}
       media={@props.media}
       onStepAdd={@handleStepAdd}
       onStepRemove={@handleStepRemove}
-      onMediaSelect={@handleStepMediaChange}
-      onMediaClear={@handleStepMediaClear}
-      onStepChange={@handleStepChange}
+      onStepMediaChange={@handleStepMediaChange}
+      onStepContentChange={@handleStepContentChange}
     />
 
   handleStepAdd: ->
-    @props.tutorial.steps.push
-      media: ''
-      content: ''
-    @props.tutorial.update 'steps'
-    @props.tutorial.save()
+    @props.dispatch tutorialActions.appendStep @props.tutorial.id
 
   handleStepRemove: (index) ->
-    @handleStepMediaClear index
-
-    changes = {}
-    changes["steps.#{index}"] = undefined
-    @props.tutorial.update changes
-
-    if @props.tutorial.steps.length is 0
-      @props.tutorial.delete()
-        .then =>
-          @props.onDelete()
-    else
-      @props.tutorial.save()
+    @props.dispatch tutorialActions.removeStep @props.tutorial.id, index
 
   handleStepMediaChange: (index, file) ->
-    @handleStepMediaClear index
+    @props.dispatch tutorialActions.setStepMedia @props.tutorial.id, index, file
 
-    payload =
-      media:
-        content_type: file.type
-        metadata:
-          filename: file.name
-
-    apiClient.post @props.tutorial._getURL('attached_images'), payload
-      .then (media) =>
-        media = [].concat(media)[0]
-        putFile media.src, file
-          .then =>
-            changes = {}
-            changes["steps.#{index}.media"] = media.id
-            @props.tutorial.update changes
-            @props.tutorial.save()
-              .then =>
-                @props.onChangeMedia()
-      .catch (error) =>
-        console.error error
-
-  handleStepMediaClear: (index) ->
-    @props.media[@props.tutorial.steps[index].media]?.delete()
-    changes = {}
-    changes["steps.#{index}.media"] = undefined
-    @props.tutorial.update changes
-    @props.tutorial.save()
-
-  handleStepChange: (index, key, value) ->
-    changes = {}
-    changes["steps.#{index}.#{key}"] = value
-    @props.tutorial.update changes
-    @saveTutorial()
-
-  saveTutorial: ->
-    unless @_debouncedSaveTutorial?
-      boundTutorialSave = @props.tutorial.save.bind @props.tutorial
-      @_debouncedSaveTutorial = debounce boundTutorialSave, @props.delayBeforeSave
-    @_debouncedSaveTutorial arguments...
+  handleStepContentChange: (index, content) ->
+    @props.dispatch tutorialActions.setStepContent @props.tutorial.id, index, content
 
 
 TutorialCreator = React.createClass
   getDefaultProps: ->
     project: null
-
-    onCreate: ->
-      console.log 'TutorialCreator onCreate', arguments
-
-  getInitialState: ->
-    error: null
+    dispatch: -> console.warn 'TutorialCreator dispatch', arguments
 
   render: ->
     <div>
       <p>This project doesn’t have a tutorial.</p>
-      {if @state.error?
-          <p>{@state.error.toString()}</p>}
       <p>
         <button type="button" onClick={@handleCreateClick}>Build one</button>
       </p>
     </div>
 
   handleCreateClick: ->
-    tutorialData =
-      steps: []
-      language: 'en'
-      links:
-        project: @props.project.id
-
-    @setState error: null
-    apiClient.type('tutorials').create(tutorialData).save()
-      .then (tutorial) =>
-        @props.onCreate tutorial
-      .catch (error) =>
-        @setState {error}
+    @props.dispatch tutorialActions.createForProject @props.project.id
 
 
-TutorialEditorFetcher = React.createClass
+mapStateToProps = (state, ownProps) ->
+  tutorial = state.tutorials.byProject[ownProps.project.id]
+  media = {}
+  {tutorial, media}
+
+TutorialEditorRoot = connect(mapStateToProps) React.createClass
   getDefaultProps: ->
     project: null
-
-  getInitialState: ->
-    loading: false
-    error: null
     tutorial: null
-    media: {}
 
   componentDidMount: ->
-    @_boundForceUpdate = @forceUpdate.bind this
-    @props.project.listen @_boundForceUpdate
     @fetchTutorialFor @props.project
-
-  componentWillUnmount: ->
-    @props.project.stopListening @_boundForceUpdate
+    if @props.tutorial?
+      @fetchMediaFor @props.tutorial
 
   componentWillReceiveProps: (nextProps) ->
     unless nextProps.project is @props.project
-      @props.project.stopListening @_boundForceUpdate
-      nextProps.project.listen @_boundForceUpdate
       @fetchTutorialFor nextProps.project
+    unless nextProps.tutorial is @props.tutorial
+      @fetchMediaFor nextProps.tutorial
 
   fetchTutorialFor: (project) ->
-    @setState
-      loading: true
-      error: null
-      tutorial: null
-    apiClient.type('tutorials').get project_id: project.id
-      .then ([tutorial]) =>
-        @setState {tutorial}
-        @fetchMediaFor tutorial
-      .catch (error) =>
-        @setState {error}
-      .then =>
-        @setState loading: false
+    tutorialActions.getByProject project.id
 
   fetchMediaFor: (tutorial) ->
-    if tutorial?
-      tutorial.get 'attached_images', {} # Prevent caching.
-        .catch =>
-          [] # We get an an error if there're no attached images.
-        .then (mediaResources) =>
-          media = {}
-          for mediaResource in mediaResources
-            media[mediaResource.id] = mediaResource
-          @setState {media}
-    else
-      @setState media: {}
+    tutorialActions.getMedia tutorial.id
 
   render: ->
-    if @state.loading
-      <p>Loading tutorial...</p>
-    else if @state.error?
-      <p>{@state.error.toString()}</p>
-    else if @state.tutorial?
-      window?.editingTutorial = @state.tutorial
-      <TutorialEditorController
-        project={@props.project}
-        tutorial={@state.tutorial}
-        media={@state.media}
-        onChangeMedia={@handleChangeToMedia}
-        onDelete={@handleTutorialCreateOrDelete}
-      />
+    if @props.tutorial?
+      <div TutorialEditorController steps={@props.tutorial.steps} media={@props.media} dispatch={@props.dispatch} />
+      <p>Edit</p>
     else
-      <TutorialCreator project={@props.project} onCreate={@handleTutorialCreateOrDelete} />
+      <div TutorialCreator dispatch={@props.dispatch} />
+      <p>Create</p>
 
-  handleChangeToMedia: ->
-    @fetchMediaFor @state.tutorial
 
-  handleTutorialCreateOrDelete: ->
-    @fetchTutorialFor @props.project
+TemporaryTutorialEditorRoot = React.createClass
+  getDefaultProps: ->
+    project: null
 
-module.exports = TutorialEditorFetcher
+  render: ->
+    <Provider store={store}>{=>
+      <TutorialEditorRoot project={@props.project} />
+    }</Provider>
+
+
+module.exports = TemporaryTutorialEditorRoot
